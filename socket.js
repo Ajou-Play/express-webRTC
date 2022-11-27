@@ -3,14 +3,40 @@ const wrtc = require("@koush/wrtc");
 const { makePC } = require("./MyWebRTC");
 
 const SocketMap = {};
-// 상품 Seller의 PC
-const ProductPC = {};
+// // 상품 Seller의 PC
+// const ProductPC = {};
 // 상품 Seller PC의 Stream 데이터
+/**
+ * {
+ *  1 : {
+ *    userId : stream
+ *  }
+ * }
+ */
 const ProductStream = {};
-// 상품에 참여하는 사람들 정보
+// // 상품에 참여하는 사람들 정보
+/**
+ * {
+ *  1 : [userId]
+ * }
+ */
 const ProductJoinUsers = {};
-// 상품에 참여하는 모든 유저들의 pc 정보
+// // 상품에 참여하는 모든 유저들의 pc 정보
+/**
+ * {
+ *  userId : pc
+ * }
+ */
 const ProductUsersPC = {};
+
+/**
+ * 보내는 용도
+ *
+ * {
+ *  1 : [{id : 2, pc}]
+ * }
+ */
+const sendPC = {};
 
 const socketInit = (server, app) => {
   const io = new Server(server, {
@@ -36,101 +62,86 @@ const socketInit = (server, app) => {
 
     //  여기부터 rtc
 
-    socket.on("openAuction", ({ productId }) => {
-      if (ProductPC[productId]) return;
-      const onIceCandidateCallback = ({ candidate }) =>
-        socket.to(socket.id).emit("getSenderCandidate", { candidate });
+    socket.on("joinCamChat", ({ chatRoomId, userId }) => {
+      console.log("joinCamChat");
+      io.to(socket.id).emit(
+        "existingUsers",
+        ProductJoinUsers[chatRoomId]?.filter((user) => user !== userId) ?? []
+      );
 
-      const onTrackCallback = (e) =>
-        (ProductStream[productId] = { id: socket.id, stream: e.streams[0] });
+      // // broadcast
+      app.get("io").to(chatRoomId).emit("joinUser", userId);
+
+      const onIceCandidateCallback = ({ candidate }) => {
+        if (candidate) {
+          console.log("in candidate");
+          io.to(socket.id).emit("getCandidate", { candidate, userId });
+        }
+      };
+
+      const onTrackCallback = (e) => {
+        ProductStream[chatRoomId] = { [userId]: { stream: e.streams[0] } };
+      };
 
       const pc = makePC(onIceCandidateCallback, onTrackCallback);
-      ProductPC[productId] = pc;
-      ProductUsersPC[socket.id] = pc;
+      ProductUsersPC[userId] = pc;
 
-      // 이게 필요할까? 채팅할때? senderOffer때 필요할까? joinAuction이 있는데.?
-      // socket.join(productId);
-
-      // product auction open db에 변경
+      (ProductJoinUsers[chatRoomId] ??= []).push(userId);
+      socket.join(chatRoomId);
     });
 
-    socket.on("senderOffer", async ({ sdp }) => {
-      // socketToRoom[socket.id] = data.productId;
-      const pc = ProductUsersPC[socket.id];
-      await pc.setRemoteDescription(sdp);
+    const handleSendPCCandidate = (userId, myId, chatRoomId) => {
+      console.log("userId : ", userId);
+      console.log("myId : ", myId);
+      if (userId === myId) return ProductUsersPC[userId];
+      const [user] = sendPC[myId].filter((user) => user.id === userId);
+      return user.pc;
+    };
 
-      const answerSdp = await pc.createAnswer({
-        offerToReceiveAudio: true,
-        offerToReceiveVIdeo: true,
-      });
-
-      await pc.setLocalDescription(answerSdp);
-
-      io.to(socket.id).emit("getSenderAnswer", { sdp: answerSdp });
-    });
-
-    socket.on("senderCandidate", ({ candidate }) => {
-      const pc = ProductUsersPC[socket.id];
+    socket.on("sendCandidate", ({ candidate, userId, myId, chatRoomId }) => {
+      console.log("sendCandidate");
+      const pc = handleSendPCCandidate(userId, myId, chatRoomId);
+      if (!pc) return;
       if (!candidate) return;
       pc.addIceCandidate(new wrtc.RTCIceCandidate(candidate));
     });
 
-    socket.on("joinAuction", ({ productId }) => {
+    const handleSendPC = ({ userId, myId, chatRoomId }) => {
+      if (userId === myId) return ProductUsersPC[userId];
       const onIceCandidateCallback = ({ candidate }) => {
-        console.log("receiverCandidate가 발생해야 이게 실행됌");
-        socket.to(socket.id).emit("getReceiverCandidate", { candidate });
+        if (candidate) {
+          io.to(socket.id).emit("getCandidate", { candidate, userId });
+        }
       };
-
       const onTrackCallback = (e) => console.log(e);
-
       const pc = makePC(onIceCandidateCallback, onTrackCallback);
+      (sendPC[myId] ??= []).push({ id: userId, pc });
+      if (!ProductStream[chatRoomId][userId]) return pc;
+      const { stream } = ProductStream[chatRoomId][userId];
+      const tracks = stream.getTracks();
+      tracks.forEach((track) => pc.addTrack(track, stream));
+      console.log("정상 작동 : ", pc);
 
-      const stream = ProductStream[productId].stream;
-      stream.getTracks().forEach((track) => pc.addTrack(track, stream));
-
-      ProductUsersPC[socket.id] = pc;
-      (ProductJoinUsers[productId] ??= []).push(socket.id);
-    });
-
-    socket.on("receiverCandidate", ({ candidate, productId }) => {
-      console.log(
-        "프론트에서 onicecandidate발생하면 이벤트 호출되는데 호출을 안해서 동작안함"
-      );
-      console.log("이게 동작해야 joinAuction에서 등록한 callback함수가 실행됌");
-      const pc = ProductPC[productId];
-      pc.addIceCandidate(new wrtc.RTCIceCandidate(candidate));
-    });
-
-    socket.on("receiverOffer", async ({ sdp }) => {
-      // socketToRoom[socket.id] = data.productId;
-      const pc = ProductUsersPC[socket.id];
+      return pc;
+    };
+    socket.on("sendOffer", async ({ sdp, userId, myId, chatRoomId }) => {
+      console.log("sendOffer");
+      console.log("userId : ", userId);
+      console.log("myId : ", myId);
+      console.log("-------------------");
+      const pc = handleSendPC({ userId, myId, chatRoomId });
+      if (!pc) return;
       await pc.setRemoteDescription(sdp);
 
       const answerSdp = await pc.createAnswer({
         offerToReceiveAudio: true,
         offerToReceiveVIdeo: true,
       });
+
       await pc.setLocalDescription(answerSdp);
 
-      io.to(socket.id).emit("getReceiverAnswer", { sdp: answerSdp });
+      io.to(socket.id).emit("getAnswer", { sdp: answerSdp, userId });
     });
-    /**
- * 
- * 
- * 
- * 
- * 
- * 
- * 
- * 
- * 
- * 
- * 
- * 
-
-
- */
-
     //   socket.on("leaveRoom", () => {
     //     try {
     //       let roomId = socketToRoom[socket.id];
