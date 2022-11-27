@@ -109,17 +109,24 @@ const socketInit = (server, app) => {
     const handleSendPC = ({ userId, myId, chatRoomId }) => {
       if (userId === myId) return ProductUsersPC[userId];
       const onIceCandidateCallback = ({ candidate }) => {
+        console.log("??tlqkfdk");
+        console.log(socket.id);
         if (candidate) {
           io.to(socket.id).emit("getCandidate", { candidate, userId });
         }
       };
-      const onTrackCallback = (e) => console.log(e);
+      const onTrackCallback = (e) => {
+        console.log("tq 발생했냐?");
+      };
       const pc = makePC(onIceCandidateCallback, onTrackCallback);
       (sendPC[myId] ??= []).push({ id: userId, pc });
       if (!ProductStream[chatRoomId][userId]) return pc;
       const { stream } = ProductStream[chatRoomId][userId];
       const tracks = stream.getTracks();
-      tracks.forEach((track) => pc.addTrack(track, stream));
+      tracks.forEach((track) => {
+        console.log("track : ", track);
+        pc.addTrack(track, stream);
+      });
       console.log("정상 작동 : ", pc);
 
       return pc;
@@ -131,14 +138,14 @@ const socketInit = (server, app) => {
       console.log("-------------------");
       const pc = handleSendPC({ userId, myId, chatRoomId });
       if (!pc) return;
-      await pc.setRemoteDescription(sdp);
+      pc.setRemoteDescription(sdp);
 
       const answerSdp = await pc.createAnswer({
         offerToReceiveAudio: true,
         offerToReceiveVIdeo: true,
       });
 
-      await pc.setLocalDescription(answerSdp);
+      pc.setLocalDescription(answerSdp);
 
       io.to(socket.id).emit("getAnswer", { sdp: answerSdp, userId });
     });
