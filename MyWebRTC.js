@@ -1,9 +1,9 @@
-const wrtc = require("@koush/wrtc");
+const wrtc = require('@koush/wrtc');
 
 const pc_config = {
   iceServers: [
     {
-      urls: "stun:stun.l.google.com:19302",
+      urls: 'stun:stun.l.google.com:19302',
     },
   ],
 };
