@@ -6,12 +6,13 @@
 
 var app = require('../app');
 var debug = require('debug')('express-webrtc:server');
-const https = require('https');
-const fs = require('fs');
-const options = {
-  key: fs.readFileSync('./config/cert.key'),
-  cert: fs.readFileSync('./config/cert.crt'),
-};
+const http = require('http');
+// const https = require('https');
+// const fs = require('fs');
+// const options = {
+//   key: fs.readFileSync('./config/cert.key'),
+//   cert: fs.readFileSync('./config/cert.crt'),
+// };
 const { socketInit } = require('../socket');
 
 /**
@@ -25,7 +26,7 @@ app.set('port', port);
  * Create HTTP server.
  */
 
-var server = https.createServer(options, app);
+var server = http.createServer(app);
 
 /**
  * Listen on provided port, on all network interfaces.
